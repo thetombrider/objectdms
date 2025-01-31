@@ -7,6 +7,8 @@ from ....core.metadata import metadata_extractor
 from ....models.document import Document
 from ....models.user import User
 from ....models.tag import Tag
+from ....repositories.document import document_repository
+from ....repositories.tag import tag_repository
 from ....api.deps import get_current_active_user
 from beanie.operators import Or, Text, In
 from datetime import datetime
@@ -95,41 +97,41 @@ async def batch_create_documents(
             detail="Number of descriptions must match number of files"
         )
     
-    uploaded_documents = []
-    file_paths = []
+    # Process tags if provided
+    tag_objects = []
+    if tags:
+        tag_objects = await tag_repository.get_or_create_many(tags)
+    
+    # Prepare document data
+    documents_data = []
+    for i, file in enumerate(files):
+        # Validate file
+        content_type = validate_file(file)
+        
+        # Extract metadata
+        metadata = await metadata_extractor.extract_metadata(file, content_type)
+        
+        documents_data.append({
+            "file": file,
+            "content_type": content_type,
+            "metadata": {
+                "title": titles[i],
+                "description": descriptions[i] if descriptions else None,
+                "file_name": file.filename,
+                "file_size": file.size,
+                "mime_type": content_type,
+                "tags": [str(tag.id) for tag in tag_objects],
+                "metadata": metadata
+            }
+        })
     
     try:
-        # Process each file in the batch
-        for i, file in enumerate(files):
-            # Validate and upload file
-            content_type = validate_file(file)
-            file_path = await storage.upload_file(str(current_user.id), file, content_type)
-            file_paths.append(file_path)
-            
-            # Extract metadata
-            metadata = await metadata_extractor.extract_metadata(file, content_type)
-            
-            # Create document record
-            document = Document(
-                title=titles[i],
-                description=descriptions[i] if descriptions else None,
-                file_path=file_path,
-                file_name=file.filename,
-                file_size=file.size,
-                mime_type=content_type,
-                owner=current_user,
-                tags=tags or [],
-                metadata=metadata
-            )
-            await document.insert()
-            uploaded_documents.append(document)
-        
-        return uploaded_documents
-        
+        # Use repository for batch creation with transaction support
+        return await document_repository.batch_create_with_files(
+            owner=current_user,
+            documents_data=documents_data
+        )
     except Exception as e:
-        # Rollback: delete any uploaded files if operation fails
-        for file_path in file_paths:
-            await storage.delete_file(file_path)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
@@ -146,30 +148,39 @@ async def create_document(
     """
     Upload a single document.
     """
-    content_type = validate_file(file)
-    
     try:
-        file_path = await storage.upload_file(str(current_user.id), file, content_type)
+        # Validate file
+        content_type = validate_file(file)
+        
+        # Process tags if provided
+        tag_objects = []
+        if tags:
+            tag_objects = await tag_repository.get_or_create_many(tags)
+        
+        # Extract metadata
         metadata = await metadata_extractor.extract_metadata(file, content_type)
         
-        document = Document(
-            title=title,
-            description=description,
-            file_path=file_path,
-            file_name=file.filename,
-            file_size=file.size,
-            mime_type=content_type,
+        # Create document using repository
+        document = await document_repository.create_with_file(
             owner=current_user,
-            tags=tags or [],
-            metadata=metadata
+            file_data={
+                "file": file,
+                "content_type": content_type
+            },
+            document_data={
+                "title": title,
+                "description": description,
+                "file_name": file.filename,
+                "file_size": file.size,
+                "mime_type": content_type,
+                "tags": [str(tag.id) for tag in tag_objects],
+                "metadata": metadata
+            }
         )
-        await document.insert()
         
         return document
         
     except Exception as e:
-        if 'file_path' in locals():
-            await storage.delete_file(file_path)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
@@ -260,31 +271,18 @@ async def batch_delete_documents(
     If permanent=True, physically delete files and records.
     If permanent=False, soft delete (mark as deleted).
     """
-    documents = await Document.find(
-        {"_id": {"$in": document_ids}, "owner.id": current_user.id}
-    ).to_list()
-    
-    if not documents:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No documents found"
+    try:
+        deleted_count = await document_repository.batch_delete_with_files(
+            owner=current_user,
+            document_ids=document_ids,
+            permanent=permanent
         )
-    
-    if permanent:
-        # Physically delete files and records
-        for doc in documents:
-            await storage.delete_file(doc.file_path)
-            if doc.thumbnail_path:
-                await storage.delete_file(doc.thumbnail_path)
-            await doc.delete()
-    else:
-        # Soft delete
-        for doc in documents:
-            doc.is_deleted = True
-            doc.updated_at = datetime.now(datetime.timezone.utc)
-            await doc.save()
-    
-    return {"message": f"Successfully deleted {len(documents)} documents"}
+        return {"message": f"Successfully deleted {deleted_count} documents"}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
 
 @router.post("/batch/restore")
 async def batch_restore_documents(
@@ -294,26 +292,17 @@ async def batch_restore_documents(
     """
     Restore soft-deleted documents.
     """
-    documents = await Document.find(
-        {
-            "_id": {"$in": document_ids},
-            "owner.id": current_user.id,
-            "is_deleted": True
-        }
-    ).to_list()
-    
-    if not documents:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No deleted documents found"
+    try:
+        restored_count = await document_repository.restore_documents(
+            owner=current_user,
+            document_ids=document_ids
         )
-    
-    for doc in documents:
-        doc.is_deleted = False
-        doc.updated_at = datetime.now(datetime.timezone.utc)
-        await doc.save()
-    
-    return {"message": f"Successfully restored {len(documents)} documents"}
+        return {"message": f"Successfully restored {restored_count} documents"}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
 
 @router.post("/batch/tags")
 async def batch_update_tags(
@@ -331,28 +320,31 @@ async def batch_update_tags(
             detail="Either add_tags or remove_tags must be provided"
         )
     
-    documents = await Document.find(
-        {"_id": {"$in": document_ids}, "owner.id": current_user.id}
-    ).to_list()
-    
-    if not documents:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No documents found"
-        )
-    
-    for doc in documents:
-        current_tags = set(doc.tags)
+    try:
+        # Process tags to add
+        add_tag_objects = []
         if add_tags:
-            current_tags.update(add_tags)
-        if remove_tags:
-            current_tags.difference_update(remove_tags)
+            add_tag_objects = await tag_repository.get_or_create_many(add_tags)
         
-        doc.tags = list(current_tags)
-        doc.updated_at = datetime.now(datetime.timezone.utc)
-        await doc.save()
-    
-    return {"message": f"Successfully updated tags for {len(documents)} documents"}
+        # Process tags to remove
+        remove_tag_objects = []
+        if remove_tags:
+            remove_tag_objects = await tag_repository.get_or_create_many(remove_tags)
+        
+        # Update documents
+        updated_count = await document_repository.update_document_tags(
+            owner=current_user,
+            document_ids=document_ids,
+            add_tags=[str(tag.id) for tag in add_tag_objects],
+            remove_tags=[str(tag.id) for tag in remove_tag_objects]
+        )
+        
+        return {"message": f"Successfully updated tags for {updated_count} documents"}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
 
 @router.get("/search")
 async def search_documents(
@@ -366,50 +358,28 @@ async def search_documents(
     """
     Search documents by text, tags, and file types.
     """
-    # Build search criteria
-    criteria = [
-        {"owner.id": current_user.id},
-        {"is_deleted": False}
-    ]
-    
-    # Add text search if query provided
-    if query:
-        criteria.append(
-            Or(
-                Text(query, path="title"),
-                Text(query, path="description"),
-                Text(query, path="metadata.preview")
-            )
+    try:
+        documents, total = await document_repository.search_documents(
+            owner=current_user,
+            query=query,
+            tags=tags,
+            mime_types=mime_types,
+            skip=skip,
+            limit=limit,
+            include_deleted=False
         )
-    
-    # Add tag filter if provided
-    if tags:
-        criteria.append({"tags": {"$in": tags}})
-    
-    # Add mime type filter if provided
-    if mime_types:
-        criteria.append({"mime_type": {"$in": mime_types}})
-    
-    # Execute search
-    documents = await Document.find(
-        {"$and": criteria}
-    ).sort(
-        [("created_at", -1)]  # Sort by creation date, newest first
-    ).skip(
-        skip
-    ).limit(
-        limit
-    ).to_list()
-    
-    # Get total count for pagination
-    total = await Document.find({"$and": criteria}).count()
-    
-    return {
-        "total": total,
-        "documents": documents,
-        "skip": skip,
-        "limit": limit
-    }
+        
+        return {
+            "total": total,
+            "documents": documents,
+            "skip": skip,
+            "limit": limit
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
 
 @router.get("/{document_id}", response_model=Document)
 async def get_document(
@@ -419,21 +389,22 @@ async def get_document(
     """
     Get a document by ID.
     """
-    document = await Document.get(document_id)
-    if not document:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document not found"
+    try:
+        document = await document_repository.get_document(
+            document_id=document_id,
+            owner=current_user
         )
-    
-    # Check ownership
-    if document.owner.id != current_user.id:
+        if not document:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Document not found"
+            )
+        return document
+    except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
         )
-    
-    return document
 
 @router.get("/{document_id}/download")
 async def download_document(
@@ -443,24 +414,15 @@ async def download_document(
     """
     Get a presigned URL to download the document.
     """
-    document = await Document.get(document_id)
-    if not document:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document not found"
+    try:
+        url = await document_repository.get_download_url(
+            document_id=document_id,
+            owner=current_user,
+            expires_in=3600  # URL valid for 1 hour
         )
-    
-    # Check ownership
-    if document.owner.id != current_user.id:
+        return {"url": url}
+    except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
-    
-    # Generate presigned URL
-    url = await storage.get_presigned_url(
-        document.file_path,
-        expires_in=3600  # URL valid for 1 hour
-    )
-    
-    return {"url": url} 
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        ) 
