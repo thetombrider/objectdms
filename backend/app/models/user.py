@@ -1,18 +1,23 @@
+"""User model."""
+
 from datetime import datetime
 from typing import Optional, List
+from zoneinfo import ZoneInfo
 from beanie import Document, Indexed
 from pydantic import EmailStr, Field, field_validator
-from .base import BaseModel
+from app.models.base import BaseDocument
 
-class User(Document, BaseModel):
-    email: str = Indexed(EmailStr, unique=True)
-    username: str = Indexed(str, unique=True)
+class User(BaseDocument):
+    """User document model."""
+    
+    email: Indexed(EmailStr, unique=True)
+    username: Indexed(str, unique=True)
     hashed_password: str
     full_name: Optional[str] = None
-    is_active: bool = True
-    is_superuser: bool = False
-    created_at: datetime = Field(default_factory=lambda: datetime.now(datetime.timezone.utc))
-    last_login: Optional[datetime] = None
+    is_active: bool = Field(default=True)
+    is_superuser: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(ZoneInfo("UTC")))
+    last_login: Optional[datetime] = Field(default=None)
     
     @field_validator('username')
     def username_must_be_valid(cls, v: str) -> str:
@@ -22,8 +27,16 @@ class User(Document, BaseModel):
             raise ValueError('Username must be alphanumeric')
         return v.lower()
     
+    async def update_last_login(self) -> None:
+        """Update last login timestamp."""
+        self.last_login = datetime.now(ZoneInfo("UTC"))
+        await self.save()
+    
     class Settings:
+        """Document settings."""
         name = "users"
+        use_revision = True
+        validate_on_save = True
         indexes = [
             "email",
             "username",

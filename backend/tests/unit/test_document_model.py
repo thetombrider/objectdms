@@ -1,7 +1,8 @@
 """Test suite for Document model."""
 
 import pytest
-from datetime import datetime, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from bson import ObjectId
 from app.models.document import Document, SharePermission, DocumentShare
 from app.models.user import User
@@ -36,12 +37,12 @@ class TestDocumentModel:
         assert not doc.is_deleted
         assert doc.version == 1
         assert isinstance(doc.created_at, datetime)
-        assert doc.created_at.tzinfo == timezone.utc
+        assert doc.created_at.tzinfo == ZoneInfo("UTC")
     
     async def test_document_sharing(self):
         """Test document sharing functionality."""
-        owner = User(id=ObjectId(), username="owner")
-        user = User(id=ObjectId(), username="user")
+        owner = User(id=ObjectId(), username="owner", hashed_password="dummy_hash")
+        user = User(id=ObjectId(), username="user", hashed_password="dummy_hash")
         
         doc = Document(
             title="Shared Doc",
@@ -79,9 +80,9 @@ class TestDocumentModel:
     
     async def test_remove_share(self):
         """Test removing document share."""
-        owner = User(id=ObjectId(), username="owner")
-        user1 = User(id=ObjectId(), username="user1")
-        user2 = User(id=ObjectId(), username="user2")
+        owner = User(id=ObjectId(), username="owner", hashed_password="dummy_hash")
+        user1 = User(id=ObjectId(), username="user1", hashed_password="dummy_hash")
+        user2 = User(id=ObjectId(), username="user2", hashed_password="dummy_hash")
         
         doc = Document(
             title="Shared Doc",
@@ -104,9 +105,9 @@ class TestDocumentModel:
     
     async def test_get_user_permissions(self):
         """Test retrieving user permissions for a document."""
-        owner = User(id=ObjectId(), username="owner")
-        user = User(id=ObjectId(), username="user")
-        other_user = User(id=ObjectId(), username="other")
+        owner = User(id=ObjectId(), username="owner", hashed_password="dummy_hash")
+        user = User(id=ObjectId(), username="user", hashed_password="dummy_hash")
+        other_user = User(id=ObjectId(), username="other", hashed_password="dummy_hash")
         
         doc = Document(
             title="Test Doc",
@@ -148,7 +149,7 @@ class TestDocumentModel:
     
     async def test_soft_delete_restore(self):
         """Test document soft deletion and restoration."""
-        owner = User(id=ObjectId(), username="owner")
+        owner = User(id=ObjectId(), username="owner", hashed_password="dummy_hash")
         doc = Document(
             title="Test Doc",
             file_path="/test.pdf",
@@ -165,7 +166,7 @@ class TestDocumentModel:
         await doc.soft_delete()
         assert doc.is_deleted
         assert isinstance(doc.deleted_at, datetime)
-        assert doc.deleted_at.tzinfo == timezone.utc
+        assert doc.deleted_at.tzinfo == ZoneInfo("UTC")
         
         # Test restore
         await doc.restore()

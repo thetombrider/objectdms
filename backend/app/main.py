@@ -31,6 +31,9 @@ app.add_middleware(
 setup_monitoring(app)
 setup_audit_middleware(app)
 
+# Include API router
+app.include_router(api_router, prefix=settings.API_V1_STR)
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize application services on startup."""
@@ -52,10 +55,6 @@ async def startup_event():
             ]
         )
         app_logger.info("MongoDB connection established")
-        
-        # Include API router
-        app.include_router(api_router, prefix=settings.API_V1_STR)
-        app_logger.info("API router initialized")
         
         app_logger.info("Application startup complete")
         

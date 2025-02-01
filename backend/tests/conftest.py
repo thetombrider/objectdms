@@ -35,13 +35,6 @@ def setup_monitoring():
     shutil.rmtree(TEST_MONITORING_DIR)
 
 @pytest.fixture(scope="session")
-def event_loop():
-    """Create an instance of the default event loop for the test session."""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
-    loop.close()
-
-@pytest.fixture(scope="session")
 async def mongodb_client() -> AsyncGenerator[AsyncIOMotorClient, None]:
     """Create a MongoDB client for testing."""
     client = AsyncIOMotorClient(settings.MONGODB_URL)
@@ -51,6 +44,9 @@ async def mongodb_client() -> AsyncGenerator[AsyncIOMotorClient, None]:
 @pytest.fixture(scope="session")
 async def init_test_db(mongodb_client: AsyncIOMotorClient) -> AsyncGenerator[None, None]:
     """Initialize the test database with required models."""
+    # Drop test database if it exists
+    await mongodb_client.drop_database(TEST_DB_NAME)
+    
     # Initialize Beanie with test database
     await init_beanie(
         database=mongodb_client[TEST_DB_NAME],
@@ -64,20 +60,10 @@ async def init_test_db(mongodb_client: AsyncIOMotorClient) -> AsyncGenerator[Non
         ]
     )
     
-    # Clean up any existing data
-    await cleanup_test_db(mongodb_client)
-    
     yield
     
     # Clean up after tests
-    await cleanup_test_db(mongodb_client)
-
-async def cleanup_test_db(client: AsyncIOMotorClient) -> None:
-    """Clean up the test database by dropping all collections."""
-    db = client[TEST_DB_NAME]
-    collections = await db.list_collection_names()
-    for collection in collections:
-        await db.drop_collection(collection)
+    await mongodb_client.drop_database(TEST_DB_NAME)
 
 @pytest.fixture(autouse=True)
 async def setup_test_db(init_test_db) -> AsyncGenerator[None, None]:

@@ -1,22 +1,38 @@
+"""Base model for all documents."""
+
 from datetime import datetime
-from typing import Optional
-from beanie import Document as BeanieDocument
-from pydantic import BaseModel, Field
+from zoneinfo import ZoneInfo
+from beanie import Document
+from pydantic import Field
 
-
-class BaseDocument(BeanieDocument):
-    """Base document with common fields for all collections"""
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
-    is_active: bool = Field(default=True)
-
+class BaseDocument(Document):
+    """Base document with common fields."""
+    
+    created_at: datetime = Field(default_factory=lambda: datetime.now(ZoneInfo("UTC")))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(ZoneInfo("UTC")))
+    is_deleted: bool = Field(default=False)
+    deleted_at: datetime | None = Field(default=None)
+    
+    async def soft_delete(self) -> None:
+        """Soft delete the document."""
+        self.is_deleted = True
+        self.deleted_at = datetime.now(ZoneInfo("UTC"))
+        await self.save()
+    
+    async def restore(self) -> None:
+        """Restore a soft-deleted document."""
+        self.is_deleted = False
+        self.deleted_at = None
+        await self.save()
+    
     class Settings:
-        use_revision: bool = True  # Enable document versioning
-        validate_on_save: bool = True  # Validate documents before saving
+        """Document settings."""
+        use_revision = True
+        validate_on_save = True
 
     async def save_document(self):
         """Save document with updated timestamp"""
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(ZoneInfo("UTC"))
         await self.save()
 
     class Config:

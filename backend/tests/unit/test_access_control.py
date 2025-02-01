@@ -18,6 +18,7 @@ class TestAccessControl:
             id=ObjectId(),
             username="admin",
             email="admin@example.com",
+            hashed_password="dummy_hash",
             is_superuser=True
         )
         
@@ -37,7 +38,8 @@ class TestAccessControl:
         user = User(
             id=ObjectId(),
             username="user",
-            email="user@example.com"
+            email="user@example.com",
+            hashed_password="dummy_hash"
         )
         
         # Create a role with specific permissions
@@ -77,12 +79,14 @@ class TestAccessControl:
         user = User(
             id=ObjectId(),
             username="user",
-            email="user@example.com"
+            email="user@example.com",
+            hashed_password="dummy_hash"
         )
         other_user = User(
             id=ObjectId(),
             username="other",
-            email="other@example.com"
+            email="other@example.com",
+            hashed_password="dummy_hash"
         )
         
         # Create documents
@@ -140,12 +144,14 @@ class TestAccessControl:
         owner = User(
             id=ObjectId(),
             username="owner",
-            email="owner@example.com"
+            email="owner@example.com",
+            hashed_password="dummy_hash"
         )
         user = User(
             id=ObjectId(),
             username="user",
-            email="user@example.com"
+            email="user@example.com",
+            hashed_password="dummy_hash"
         )
         
         # Create document
@@ -209,7 +215,8 @@ class TestAccessControl:
         user = User(
             id=ObjectId(),
             username="user",
-            email="user@example.com"
+            email="user@example.com",
+            hashed_password="dummy_hash"
         )
         
         # Create role without permissions
@@ -236,7 +243,8 @@ class TestAccessControl:
         user = User(
             id=ObjectId(),
             username="user",
-            email="user@example.com"
+            email="user@example.com",
+            hashed_password="dummy_hash"
         )
         
         # Create documents

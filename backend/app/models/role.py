@@ -1,40 +1,46 @@
-from datetime import datetime, timezone
-from typing import List, Optional
-from beanie import Document, Link
+"""Role and permission models."""
+
+from typing import List, Dict, Any
+from beanie import Indexed, Link
 from pydantic import Field
-from .base import BaseModel
-from .user import User
 
-class Permission(BaseModel):
-    """Permission model for role-based access control."""
-    resource: str  # e.g., "document", "tag"
-    action: str    # e.g., "create", "read", "update", "delete"
-    conditions: dict = {}
+from app.models.base import BaseDocument
+from app.models.user import User
 
-class Role(Document):
-    """Role model for user permissions."""
-    name: str
-    description: Optional[str] = None
-    permissions: List[Permission] = []
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+class Permission:
+    """Permission model."""
+    
+    def __init__(
+        self,
+        resource: str,
+        action: str,
+        conditions: Dict[str, Any] | None = None
+    ):
+        self.resource = resource
+        self.action = action
+        self.conditions = conditions or {}
+
+class Role(BaseDocument):
+    """Role document model."""
+    
+    name: Indexed(str, unique=True)
+    description: str | None = None
+    permissions: List[Permission] = Field(default_factory=list)
     
     class Settings:
+        """Document settings."""
         name = "roles"
-        indexes = [
-            "name",
-            [("name", 1)],  # Unique index on name
-        ]
+        use_revision = True
+        validate_on_save = True
 
-class UserRole(Document):
-    """User-Role association model."""
-    user: Link[User]
-    role: Link[Role]
-    assigned_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    assigned_by: Optional[Link[User]] = None
+class UserRole(BaseDocument):
+    """User role assignment model."""
+    
+    user: Link[User] = Field(...)
+    role: Link[Role] = Field(...)
     
     class Settings:
+        """Document settings."""
         name = "user_roles"
-        indexes = [
-            [("user", 1), ("role", 1)],  # Compound index for quick lookups
-        ] 
+        use_revision = True
+        validate_on_save = True 

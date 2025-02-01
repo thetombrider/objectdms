@@ -1,30 +1,20 @@
-from datetime import datetime
-from typing import Optional
-from beanie import Document, Indexed
-from pydantic import Field
-from .base import BaseModel
+"""Tag model."""
 
-class Tag(Document, BaseModel):
-    name: str = Indexed(str, unique=True)
-    description: Optional[str] = None
-    color: Optional[str] = "#808080"  # Default gray color
-    created_at: datetime = Field(default_factory=lambda: datetime.now(datetime.timezone.utc))
+from beanie import Indexed, Link
+from pydantic import Field
+
+from app.models.base import BaseDocument
+from app.models.user import User
+
+class Tag(BaseDocument):
+    """Tag document model."""
+    
+    name: Indexed(str, unique=True)
+    description: str | None = None
+    owner: Link[User] = Field(...)
     
     class Settings:
+        """Document settings."""
         name = "tags"
-        indexes = [
-            "name",
-            [
-                ("name", "text"),
-                ("description", "text"),
-            ],
-        ]
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "name": "invoice",
-                "description": "Financial documents and invoices",
-                "color": "#FF0000"
-            }
-        }
+        use_revision = True
+        validate_on_save = True
