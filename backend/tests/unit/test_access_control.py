@@ -1,3 +1,5 @@
+"""Test suite for AccessControl service."""
+
 import pytest
 from bson import ObjectId
 from fastapi import HTTPException

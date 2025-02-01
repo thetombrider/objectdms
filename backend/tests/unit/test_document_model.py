@@ -1,3 +1,5 @@
+"""Test suite for Document model."""
+
 import pytest
 from datetime import datetime, timezone
 from bson import ObjectId

@@ -1,1 +1,1 @@
-ÿþ
+"""Test package for ObjectDMS."""
