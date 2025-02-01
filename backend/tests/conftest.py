@@ -1,11 +1,14 @@
 """Test configuration and fixtures."""
 
 import os
+import shutil
 import pytest
 import asyncio
 from typing import AsyncGenerator
 from motor.motor_asyncio import AsyncIOMotorClient
 from beanie import init_beanie
+from httpx import AsyncClient
+from fastapi import FastAPI
 
 from app.core.config import settings
 from app.models.user import User
@@ -13,9 +16,23 @@ from app.models.document import Document
 from app.models.tag import Tag
 from app.models.role import Role, UserRole, Permission
 from app.models.audit import AuditLog
+from app.main import app
 
 # Test database name
 TEST_DB_NAME = "test_objectdms"
+
+# Test monitoring directory
+TEST_MONITORING_DIR = "test_monitoring"
+
+@pytest.fixture(scope="session", autouse=True)
+def setup_monitoring():
+    """Set up monitoring directory for tests."""
+    os.environ["PROMETHEUS_MULTIPROC_DIR"] = TEST_MONITORING_DIR
+    if os.path.exists(TEST_MONITORING_DIR):
+        shutil.rmtree(TEST_MONITORING_DIR)
+    os.makedirs(TEST_MONITORING_DIR)
+    yield
+    shutil.rmtree(TEST_MONITORING_DIR)
 
 @pytest.fixture(scope="session")
 def event_loop():
@@ -66,6 +83,15 @@ async def cleanup_test_db(client: AsyncIOMotorClient) -> None:
 async def setup_test_db(init_test_db) -> AsyncGenerator[None, None]:
     """Fixture to ensure database is initialized for each test."""
     yield
+
+@pytest.fixture
+async def client() -> AsyncGenerator[AsyncClient, None]:
+    """Create an async HTTP client for testing."""
+    async with AsyncClient(
+        app=app,
+        base_url="http://test"
+    ) as client:
+        yield client
 
 @pytest.fixture
 async def test_user() -> User:

@@ -2,16 +2,16 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from beanie import init_beanie
-from .core.config import settings
-from .core.logging import app_logger
-from .core.monitoring import setup_monitoring
-from .core.middleware.audit import setup_audit_middleware
-from .api.v1.endpoints import router as api_router
-from .models.user import User
-from .models.document import Document
-from .models.tag import Tag
-from .models.role import Role, UserRole
-from .models.audit import AuditLog
+from app.core.config import settings
+from app.core.logging import app_logger
+from app.core.monitoring import setup_monitoring
+from app.core.middleware.audit import setup_audit_middleware
+from app.api.v1.endpoints import router as api_router
+from app.models.user import User
+from app.models.document import Document
+from app.models.tag import Tag
+from app.models.role import Role, UserRole
+from app.models.audit import AuditLog
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -83,4 +83,4 @@ async def shutdown_event():
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
-    return {"status": "healthy"} 
+    return {"status": "healthy"}

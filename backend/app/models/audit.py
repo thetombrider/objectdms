@@ -1,31 +1,34 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 from beanie import Document, Link
-from pydantic import BaseModel
+from pydantic import Field
 from .user import User
 
 class AuditLog(Document):
     """Audit log model for tracking system events."""
-    timestamp: datetime = datetime.now(datetime.timezone.utc)
-    user: Optional[Link[User]] = None
-    action: str  # e.g., "create", "read", "update", "delete", "share"
-    resource_type: str  # e.g., "document", "user", "tag"
-    resource_id: str
-    details: Dict[str, Any] = {}
-    ip_address: Optional[str] = None
-    user_agent: Optional[str] = None
-    status: str = "success"  # "success" or "failure"
-    error_message: Optional[str] = None
-    
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    event_type: str  # e.g., "document.create", "user.login"
+    user: Optional[Link[User]]  # The user who performed the action
+    resource_type: str  # e.g., "document", "user"
+    resource_id: Optional[str]  # ID of the affected resource
+    action: str  # e.g., "create", "update", "delete"
+    details: Dict[str, Any] = {}  # Additional event details
+    ip_address: Optional[str]  # IP address of the user
+    user_agent: Optional[str]  # User agent string
+
     class Settings:
+        """Beanie ODM settings."""
         name = "audit_logs"
         indexes = [
             "timestamp",
+            "event_type",
             "user",
-            "action",
             "resource_type",
             "resource_id",
-            "status"
+            "action",
+            [("timestamp", -1)],  # Index for time-based queries
+            [("user", 1), ("timestamp", -1)],  # Index for user activity queries
+            [("resource_type", 1), ("resource_id", 1), ("timestamp", -1)]  # Index for resource history
         ]
     
     @classmethod

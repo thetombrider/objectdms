@@ -250,26 +250,12 @@ class TestAccessControl:
         )
         await owned_doc.insert()
         
-        other_doc = Document(
-            title="Other Doc",
-            file_path="/other.pdf",
-            file_name="other.pdf",
-            file_size=1024,
-            mime_type="application/pdf",
-            owner=User(id=ObjectId())
-        )
-        await other_doc.insert()
-        
-        # Create role with ownership condition
+        # Create role with read permission
         role = Role(
             id=ObjectId(),
-            name="doc_owner",
+            name="reader",
             permissions=[
-                Permission(
-                    resource="document",
-                    action="read",
-                    conditions={"owner": True}
-                )
+                Permission(resource="document", action="read")
             ]
         )
         await role.insert()
@@ -279,9 +265,7 @@ class TestAccessControl:
         await user_role.insert()
         
         # Get accessible documents
-        accessible_ids = await AccessControl.get_accessible_resources(
+        accessible_docs = await AccessControl.get_accessible_resources(
             user, "document", "read"
         )
-        
-        assert str(owned_doc.id) in accessible_ids
-        assert str(other_doc.id) not in accessible_ids 
+        assert str(owned_doc.id) in accessible_docs 

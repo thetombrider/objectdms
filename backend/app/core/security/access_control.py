@@ -1,62 +1,43 @@
-from typing import List, Optional, Any
+"""Access control service for managing permissions."""
+
+from typing import Optional, Any, List
 from fastapi import HTTPException, status
-from ...models.role import Role, UserRole, Permission
 from ...models.user import User
+from ...models.role import Role, UserRole, Permission
 from ...models.document import Document
 from ..logging import app_logger
 
 class AccessControl:
-    """Access control service implementing Role-Based Access Control (RBAC).
-    
-    This service provides methods to check and enforce permissions based on user roles
-    and specific conditions. It supports:
-    - Role-based permission checks
-    - Resource-specific access control
-    - Conditional permissions (e.g., ownership-based access)
-    - Permission enforcement with HTTP exception handling
-    """
+    """Service for managing access control and permissions."""
     
     @staticmethod
     async def check_permission(
         user: User,
         resource: str,
         action: str,
-        target: Any = None
+        target: Optional[Any] = None
     ) -> bool:
-        """Check if a user has permission to perform an action on a resource.
-        
-        This method implements the core RBAC logic, checking:
-        1. Superuser status (automatic access)
-        2. User roles and their associated permissions
-        3. Permission conditions (e.g., ownership)
+        """
+        Check if a user has permission to perform an action on a resource.
         
         Args:
             user: The user to check permissions for
-            resource: Resource type (e.g., "document", "tag")
-            action: Action to perform (e.g., "create", "read", "update", "delete")
-            target: Optional target object to check conditions against
+            resource: The type of resource (e.g., "document", "user")
+            action: The action to perform (e.g., "create", "read", "update", "delete")
+            target: Optional target resource instance to check conditions against
             
         Returns:
-            bool: True if user has permission, False otherwise
-            
-        Example:
-            >>> has_access = await AccessControl.check_permission(
-            ...     user, "document", "read", document
-            ... )
+            bool: Whether the user has permission
         """
         # Superusers have all permissions
         if user.is_superuser:
             return True
         
-        # Get user roles
-        user_roles = await UserRole.find({"user": user.id}).to_list()
-        if not user_roles:
-            return False
-        
-        # Get role permissions
+        # Get user's roles
+        user_roles = await UserRole.find({"user.id": user.id}).to_list()
         roles = await Role.find({"_id": {"$in": [ur.role.id for ur in user_roles]}}).to_list()
         
-        # Check permissions
+        # Check each role's permissions
         for role in roles:
             for permission in role.permissions:
                 if permission.resource == resource and permission.action == action:
@@ -65,39 +46,12 @@ class AccessControl:
                         return True
                     
                     # Check conditions
-                    if target and await AccessControl._check_conditions(
-                        user, permission.conditions, target
-                    ):
-                        return True
+                    if target:
+                        if await AccessControl._check_conditions(
+                            user, permission.conditions, target
+                        ):
+                            return True
         
-        return False
-    
-    @staticmethod
-    async def _check_conditions(user: User, conditions: dict, target: Any) -> bool:
-        """Check permission conditions against a target object.
-        
-        Evaluates specific conditions that may be required for permission grant.
-        Currently supports:
-        - Ownership check: User must own the resource
-        - Shared check: Resource must be shared with the user
-        
-        Args:
-            user: The user to check conditions for
-            conditions: Dictionary of condition names and values
-            target: The object to check conditions against
-            
-        Returns:
-            bool: True if all conditions are met, False otherwise
-        """
-        for condition, value in conditions.items():
-            if condition == "owner":
-                # Check if user is the owner
-                if hasattr(target, "owner"):
-                    return target.owner.id == user.id
-            elif condition == "shared":
-                # Check if document is shared with user
-                if isinstance(target, Document):
-                    return user.id in [share.user.id for share in target.shared_with]
         return False
     
     @staticmethod
@@ -105,31 +59,21 @@ class AccessControl:
         user: User,
         resource: str,
         action: str,
-        target: Any = None
+        target: Optional[Any] = None
     ) -> None:
-        """Ensure user has permission or raise an HTTP exception.
-        
-        This is a convenience method that combines permission checking with
-        HTTP exception handling. It's designed for use in API endpoints.
+        """
+        Ensure a user has permission or raise an HTTPException.
         
         Args:
             user: The user to check permissions for
-            resource: Resource type (e.g., "document", "tag")
-            action: Action to perform (e.g., "create", "read", "update", "delete")
-            target: Optional target object to check conditions against
+            resource: The type of resource
+            action: The action to perform
+            target: Optional target resource instance
             
         Raises:
-            HTTPException: With 403 status code if permission is denied
-            
-        Example:
-            >>> await AccessControl.ensure_permission(
-            ...     user, "document", "update", document
-            ... )
+            HTTPException: If the user doesn't have permission
         """
-        has_permission = await AccessControl.check_permission(
-            user, resource, action, target
-        )
-        if not has_permission:
+        if not await AccessControl.check_permission(user, resource, action, target):
             app_logger.warning(
                 f"Access denied: User {user.id} attempted {action} on {resource}"
             )
@@ -139,65 +83,87 @@ class AccessControl:
             )
     
     @staticmethod
+    async def _check_conditions(
+        user: User,
+        conditions: dict,
+        target: Any
+    ) -> bool:
+        """
+        Check if conditions are met for a target resource.
+        
+        Args:
+            user: The user to check conditions for
+            conditions: The conditions to check
+            target: The target resource instance
+            
+        Returns:
+            bool: Whether all conditions are met
+        """
+        for condition, value in conditions.items():
+            if condition == "owner" and value:
+                if not hasattr(target, "owner"):
+                    return False
+                if target.owner.id != user.id:
+                    return False
+            
+            elif condition == "shared" and value:
+                if not isinstance(target, Document):
+                    return False
+                # Check if document is shared with user
+                for share in target.shared_with:
+                    if share.user.id == user.id:
+                        return True
+                return False
+        
+        return True
+    
+    @staticmethod
     async def get_accessible_resources(
         user: User,
         resource: str,
         action: str
     ) -> List[str]:
-        """Get list of resource IDs that user has permission to access.
-        
-        This method is useful for filtering queries to only show resources
-        the user has access to. It considers:
-        - User's roles and permissions
-        - Resource ownership
-        - Shared resources
+        """
+        Get IDs of resources the user has access to.
         
         Args:
-            user: The user to check permissions for
-            resource: Resource type (e.g., "document", "tag")
-            action: Action to perform (e.g., "read", "update")
+            user: The user to check access for
+            resource: The type of resource
+            action: The action to check
             
         Returns:
-            List[str]: List of accessible resource IDs.
-                      Empty list means no restrictions (full access).
-                      
-        Example:
-            >>> accessible_docs = await AccessControl.get_accessible_resources(
-            ...     user, "document", "read"
-            ... )
+            List of resource IDs the user has access to
         """
-        # Superusers can access everything
+        # Superusers have access to everything
         if user.is_superuser:
-            return []  # Empty list means no restrictions
+            return []  # Return empty list to indicate no filtering needed
         
-        accessible_ids = set()
-        
-        # Get user roles and their permissions
-        user_roles = await UserRole.find({"user": user.id}).to_list()
+        # Get user's roles and permissions
+        user_roles = await UserRole.find({"user.id": user.id}).to_list()
         roles = await Role.find({"_id": {"$in": [ur.role.id for ur in user_roles]}}).to_list()
         
-        # Check each role's permissions
+        # Collect conditions from all matching permissions
+        conditions = []
         for role in roles:
             for permission in role.permissions:
                 if permission.resource == resource and permission.action == action:
-                    if not permission.conditions:
-                        return []  # No restrictions
-                    
-                    # Handle ownership condition
-                    if permission.conditions.get("owner"):
-                        if resource == "document":
-                            docs = await Document.find({"owner": user.id}).to_list()
-                            accessible_ids.update(str(doc.id) for doc in docs)
-                    
-                    # Handle shared condition
-                    if permission.conditions.get("shared"):
-                        if resource == "document":
-                            docs = await Document.find(
-                                {"shared_with.user": user.id}
-                            ).to_list()
-                            accessible_ids.update(str(doc.id) for doc in docs)
+                    if permission.conditions:
+                        conditions.append(permission.conditions)
+                    else:
+                        return []  # No conditions means access to all
         
-        return list(accessible_ids)
+        if not conditions:
+            return ["none"]  # No matching permissions
+        
+        # Build query based on conditions
+        query = {"$or": []}
+        for condition in conditions:
+            if "owner" in condition and condition["owner"]:
+                query["$or"].append({"owner.id": user.id})
+            if "shared" in condition and condition["shared"]:
+                query["$or"].append({"shared_with.user.id": user.id})
+        
+        return query["$or"] if query["$or"] else ["none"]
 
 # Global instance for convenient access
 access_control = AccessControl() 
